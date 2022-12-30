@@ -257,7 +257,7 @@ impl Name {
         Ok(Self { name, namespace })
     }
 
-    fn get_name_and_namespace(name: &str) -> AvroResult<(String, Namespace)> {
+    pub(crate) fn get_name_and_namespace(name: &str) -> AvroResult<(String, Namespace)> {
         let caps = SCHEMA_NAME_R
             .captures(name)
             .ok_or_else(|| Error::InvalidSchemaName(name.to_string(), SCHEMA_NAME_R.as_str()))?;
@@ -399,9 +399,10 @@ impl Serialize for Alias {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ResolvedSchema<'s> {
     names_ref: NamesRef<'s>,
-    root_schema: &'s Schema,
+    schemata: Vec<&'s Schema>,
 }
 
 impl<'s> TryFrom<&'s Schema> for ResolvedSchema<'s> {
@@ -411,71 +412,84 @@ impl<'s> TryFrom<&'s Schema> for ResolvedSchema<'s> {
         let names = HashMap::new();
         let mut rs = ResolvedSchema {
             names_ref: names,
-            root_schema: schema,
+            schemata: vec![schema],
         };
-        Self::from_internal(rs.root_schema, &mut rs.names_ref, &None)?;
+        Self::from_internal(rs.get_schemata(), &mut rs.names_ref, &None)?;
+        Ok(rs)
+    }
+}
+
+impl<'s> TryFrom<&'s [&'s Schema]> for ResolvedSchema<'s> {
+    type Error = Error;
+
+    fn try_from(schemata: &[&'s Schema]) -> AvroResult<Self> {
+        let names = HashMap::new();
+        let mut rs = ResolvedSchema {
+            names_ref: names,
+            schemata: schemata.to_vec(),
+        };
+        Self::from_internal(rs.get_schemata(), &mut rs.names_ref, &None)?;
         Ok(rs)
     }
 }
 
 impl<'s> ResolvedSchema<'s> {
-    pub(crate) fn get_root_schema(&self) -> &'s Schema {
-        self.root_schema
+    pub(crate) fn get_schemata(&self) -> Vec<&'s Schema> {
+        self.schemata.clone()
     }
+
     pub(crate) fn get_names(&self) -> &NamesRef<'s> {
         &self.names_ref
     }
 
     fn from_internal(
-        schema: &'s Schema,
+        schemata: Vec<&'s Schema>,
         names_ref: &mut NamesRef<'s>,
         enclosing_namespace: &Namespace,
     ) -> AvroResult<()> {
-        match schema {
-            Schema::Array(schema) | Schema::Map(schema) => {
-                Self::from_internal(schema, names_ref, enclosing_namespace)
-            }
-            Schema::Union(UnionSchema { schemas, .. }) => {
-                for schema in schemas {
-                    Self::from_internal(schema, names_ref, enclosing_namespace)?
+        for schema in schemata {
+            match schema {
+                Schema::Array(schema) | Schema::Map(schema) => {
+                    Self::from_internal(vec![schema], names_ref, enclosing_namespace)?
                 }
-                Ok(())
-            }
-            Schema::Enum { name, .. } | Schema::Fixed { name, .. } => {
-                let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
-                if names_ref
-                    .insert(fully_qualified_name.clone(), schema)
-                    .is_some()
-                {
-                    Err(Error::AmbiguousSchemaDefinition(fully_qualified_name))
-                } else {
-                    Ok(())
-                }
-            }
-            Schema::Record { name, fields, .. } => {
-                let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
-                if names_ref
-                    .insert(fully_qualified_name.clone(), schema)
-                    .is_some()
-                {
-                    Err(Error::AmbiguousSchemaDefinition(fully_qualified_name))
-                } else {
-                    let record_namespace = fully_qualified_name.namespace;
-                    for field in fields {
-                        Self::from_internal(&field.schema, names_ref, &record_namespace)?
+                Schema::Union(UnionSchema { schemas, .. }) => {
+                    for schema in schemas {
+                        Self::from_internal(vec![schema], names_ref, enclosing_namespace)?
                     }
-                    Ok(())
                 }
+                Schema::Enum { name, .. } | Schema::Fixed { name, .. } => {
+                    let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
+                    if names_ref
+                        .insert(fully_qualified_name.clone(), schema)
+                        .is_some()
+                    {
+                        return Err(Error::AmbiguousSchemaDefinition(fully_qualified_name));
+                    }
+                }
+                Schema::Record { name, fields, .. } => {
+                    let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
+                    if names_ref
+                        .insert(fully_qualified_name.clone(), schema)
+                        .is_some()
+                    {
+                        return Err(Error::AmbiguousSchemaDefinition(fully_qualified_name));
+                    } else {
+                        let record_namespace = fully_qualified_name.namespace;
+                        for field in fields {
+                            Self::from_internal(vec![&field.schema], names_ref, &record_namespace)?
+                        }
+                    }
+                }
+                Schema::Ref { name } => {
+                    let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
+                    if names_ref.get(&fully_qualified_name).is_none() {
+                        return Err(Error::SchemaResolutionError(fully_qualified_name));
+                    }
+                }
+                _ => (),
             }
-            Schema::Ref { name } => {
-                let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
-                names_ref
-                    .get(&fully_qualified_name)
-                    .map(|_| ())
-                    .ok_or(Error::SchemaResolutionError(fully_qualified_name))
-            }
-            _ => Ok(()),
         }
+        Ok(())
     }
 }
 
