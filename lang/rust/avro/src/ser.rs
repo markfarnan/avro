@@ -221,19 +221,21 @@ impl<'b> ser::Serializer for &'b mut Serializer {
         self,
         _: &'static str,
         index: u32,
-        variant: &'static str,
+        _variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        Ok(Value::Record(vec![
-            ("type".to_owned(), Value::Enum(index, variant.to_owned())),
-            (
-                "value".to_owned(),
-                Value::Union(index, Box::new(value.serialize(self)?)),
-            ),
-        ]))
+        // Ok(Value::Record(vec![
+        //     ("type".to_owned(), Value::Enum(index, variant.to_owned())),
+        //     (
+        //         "value".to_owned(),
+        //         Value::Union(index, Box::new(value.serialize(self)?)),
+        //     ),
+        // ]))
+
+        Ok(Value::Union(index, Box::new(value.serialize(self)?)))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -771,13 +773,7 @@ mod tests {
 
         let expected = Value::Record(vec![(
             "a".to_owned(),
-            Value::Record(vec![
-                ("type".to_owned(), Value::Enum(0, "Double".to_owned())),
-                (
-                    "value".to_owned(),
-                    Value::Union(0, Box::new(Value::Double(64.0))),
-                ),
-            ]),
+            Value::Union(0, Box::new(Value::Double(64.0))),
         )]);
 
         assert_eq!(
