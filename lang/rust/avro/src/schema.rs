@@ -701,6 +701,11 @@ impl UnionSchema {
     /// within this union.
     pub fn find_schema(&self, value: &types::Value) -> Option<(usize, &Schema)> {
         let schema_kind = SchemaKind::from(value);
+        // println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+        // println!("{:?}", self);
+        // println!("{:?}", value);
+        // println!("{:?}", schema_kind);
+        // println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         if let Some(&i) = self.variant_index.get(&schema_kind) {
             // fast path
             Some((i, &self.schemas[i]))
@@ -709,6 +714,9 @@ impl UnionSchema {
             self.schemas.iter().enumerate().find(|(_, schema)| {
                 let rs =
                     ResolvedSchema::try_from(*schema).expect("Schema didn't successfully parse");
+                // println!("{:?}", rs);
+                // println!("{:?}", schema);
+
                 value
                     .validate_internal(schema, rs.get_names(), &schema.namespace())
                     .is_none()

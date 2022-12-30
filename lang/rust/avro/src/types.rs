@@ -375,6 +375,8 @@ impl Value {
         names: &HashMap<Name, S>,
         enclosing_namespace: &Namespace,
     ) -> Option<String> {
+        // println!("-----------------------------------------------------------------------------------------------------");
+        // println!("{:?} :-: {:?}", self, schema);
         match (self, schema) {
             (_, &Schema::Ref { ref name }) => {
                 let name = name.fully_qualified_name(enclosing_namespace);
@@ -559,7 +561,13 @@ impl Value {
                     }
                 })
             }
-            (_v, _s) => Some("Unsupported value-schema combination".to_string()),
+            (_v, _s) => {
+                println!(":-----------------------------------------------------------------------------------------------------");
+                println!("{:?} :-: {:?}", _v, _s);
+                println!("Unsupported value-schema combination");
+                println!(":-----------------------------------------------------------------------------------------------------");
+                Some("Unsupported value-schema combination".to_string())
+            }
         }
     }
 
@@ -2646,5 +2654,114 @@ Field with name '"b"' is not a member of the map items"#,
     #[test]
     fn test_avro_3688_field_b_set() {
         avro_3688_schema_resolution_panic(true);
+    }
+
+    #[test]
+    fn validate_record_union() {
+        // {
+        //    "type": "record",
+        //    "fields": [
+        //      {"type": "long", "name": "a"},
+        //      {"type": "string", "name": "b"},
+        //      {
+        //          "type": [ "int", "long"]
+        //          "name": "c",
+        //          "default": null
+        //      }
+        //    ]
+        // }
+        let schema = Schema::Record {
+            name: Name::new("some_record").unwrap(),
+            aliases: None,
+            doc: None,
+            fields: vec![
+                RecordField {
+                    name: "a".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::Long,
+                    order: RecordFieldOrder::Ascending,
+                    position: 0,
+                    custom_attributes: Default::default(),
+                },
+                RecordField {
+                    name: "b".to_string(),
+                    doc: None,
+                    default: None,
+                    schema: Schema::String,
+                    order: RecordFieldOrder::Ascending,
+                    position: 1,
+                    custom_attributes: Default::default(),
+                },
+                RecordField {
+                    name: "c".to_string(),
+                    doc: None,
+                    default: Some(JsonValue::Null),
+                    schema: Schema::Union(
+                        UnionSchema::new(vec![Schema::Int, Schema::Long]).unwrap(),
+                    ),
+                    order: RecordFieldOrder::Ascending,
+                    position: 2,
+                    custom_attributes: Default::default(),
+                },
+            ],
+            lookup: [
+                ("a".to_string(), 0),
+                ("b".to_string(), 1),
+                ("c".to_string(), 2),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            attributes: Default::default(),
+        };
+
+        // assert!(Value::Map(
+        //     vec![
+        //         ("a".to_string(), Value::Long(42i64)),
+        //         ("b".to_string(), Value::String("foo".to_string())),
+        //         (
+        //             "c".to_string(),
+        //             Value::Union(2, Box::new(Value::Long(42i64)))
+        //         ),
+        //     ]
+        //     .into_iter()
+        //     .collect()
+        // )
+        // .validate(&schema));
+
+        assert!(Value::Record(vec![
+            ("a".to_string(), Value::Long(42i64)),
+            ("b".to_string(), Value::String("foo".to_string())),
+            (
+                "c".to_string(),
+                Value::Union(2, Box::new(Value::Long(24i64)))
+            ),
+        ])
+        .validate(&schema));
+
+        // assert!(Value::Map(
+        //     vec![
+        //         ("a".to_string(), Value::Long(42i64)),
+        //         ("b".to_string(), Value::String("foo".to_string())),
+        //         (
+        //             "c".to_string(),
+        //             Value::Union(2, Box::new(Value::Long(42i64)))
+        //         ),
+        //     ]
+        //     .into_iter()
+        //     .collect()
+        // )
+        // .validate(&schema));
+
+        // assert!(Value::Union(
+        //     1,
+        //     Box::new(Value::Record(vec![
+        //         ("a".to_string(), Value::Long(42i64)),
+        //         ("b".to_string(), Value::String("foo".to_string())),
+        //     ]))
+        // )
+
+        //      assert!(Value::Union(2, Box::new(Value::Long(42i64)),).validate(&union_schema));
     }
 }
