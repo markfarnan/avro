@@ -561,11 +561,8 @@ impl Value {
                     }
                 })
             }
-            (_v, _s) => {
-                println!(":-----------------------------------------------------------------------------------------------------");
-                println!("{:?} :-: {:?}", _v, _s);
-                println!("Unsupported value-schema combination");
-                println!(":-----------------------------------------------------------------------------------------------------");
+            (v, s) => {
+                debug!("Unsupported value-schema ({:?}-{:?}) combination:", v, s);
                 Some("Unsupported value-schema combination".to_string())
             }
         }
@@ -1036,10 +1033,12 @@ mod tests {
         decimal::Decimal,
         duration::{Days, Duration, Millis, Months},
         schema::{Name, RecordField, RecordFieldOrder, Schema, UnionSchema},
+        to_value,
         types::Value,
     };
     use apache_avro_test_helper::logger::{assert_logged, assert_not_logged};
     use pretty_assertions::assert_eq;
+    use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
     #[test]
@@ -2486,282 +2485,53 @@ Field with name '"b"' is not a member of the map items"#,
         );
     }
 
-    fn avro_3674_with_or_without_namespace(with_namespace: bool) {
-        use crate::ser::Serializer;
-        use serde::Serialize;
+    #[test]
+    fn avro_3631_test_serialize_fixed_fields() {
+        use crate::{avro_serialize_bytes, avro_serialize_fixed};
 
-        let schema_str = r#"{
-            "type": "record",
-            "name": "NamespacedMessage",
-            [NAMESPACE]
-            "fields": [
-                {
-                    "type": "record",
-                    "name": "field_a",
-                    "fields": [
-                        {
-                            "name": "enum_a",
-                            "type": {
-                                "type": "enum",
-                                "name": "EnumType",
-                                "symbols": [
-                                    "SYMBOL_1",
-                                    "SYMBOL_2"
-                                ],
-                                "default": "SYMBOL_1"
-                            }
-                        },
-                        {
-                            "name": "enum_b",
-                            "type": "EnumType"
+        #[derive(Debug, Serialize, Deserialize)]
+        struct TestStructFixedField<'a> {
+            #[serde(serialize_with = "avro_serialize_bytes")]
+            bytes_field: &'a [u8],
+            #[serde(serialize_with = "avro_serialize_bytes")]
+            vec_field: Vec<u8>,
+            #[serde(serialize_with = "avro_serialize_fixed")]
+            fixed_field: [u8; 6],
+        }
+
+        let test = TestStructFixedField {
+            bytes_field: &[1, 2, 3],
+            fixed_field: [1; 6],
+            vec_field: vec![2, 3, 4],
+        };
+        let value: Value = to_value(test).unwrap();
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "record",
+                "name": "TestStructFixedField",
+                "fields": [
+                    {
+                        "name": "bytes_field",
+                        "type": "bytes"
+                    },
+                    {
+                        "name": "vec_field",
+                        "type": "bytes"
+                    },
+                    {
+                        "name": "fixed_field",
+                        "type": {
+                            "name": "fixed_field",
+                            "type": "fixed",
+                            "size": 6
                         }
-                    ]
-                }
-            ]
-        }"#;
-        let schema_str = schema_str.replace(
-            "[NAMESPACE]",
-            if with_namespace {
-                r#""namespace": "com.domain","#
-            } else {
-                ""
-            },
-        );
-
-        let schema = Schema::parse_str(&schema_str).unwrap();
-
-        #[derive(Serialize)]
-        enum EnumType {
-            #[serde(rename = "SYMBOL_1")]
-            Symbol1,
-            #[serde(rename = "SYMBOL_2")]
-            Symbol2,
-        }
-
-        #[derive(Serialize)]
-        struct FieldA {
-            enum_a: EnumType,
-            enum_b: EnumType,
-        }
-
-        #[derive(Serialize)]
-        struct NamespacedMessage {
-            field_a: FieldA,
-        }
-
-        let msg = NamespacedMessage {
-            field_a: FieldA {
-                enum_a: EnumType::Symbol2,
-                enum_b: EnumType::Symbol1,
-            },
-        };
-
-        let mut ser = Serializer::default();
-        let test_value: Value = msg.serialize(&mut ser).unwrap();
-        assert!(test_value.validate(&schema), "test_value should validate");
-        assert!(
-            test_value.resolve(&schema).is_ok(),
-            "test_value should resolve"
-        );
-    }
-
-    #[test]
-    fn test_avro_3674_validate_no_namespace_resolution() {
-        avro_3674_with_or_without_namespace(false);
-    }
-
-    #[test]
-    fn test_avro_3674_validate_with_namespace_resolution() {
-        avro_3674_with_or_without_namespace(true);
-    }
-
-    fn avro_3688_schema_resolution_panic(set_field_b: bool) {
-        use crate::ser::Serializer;
-        use serde::{Deserialize, Serialize};
-
-        let schema_str = r#"{
-            "type": "record",
-            "name": "Message",
-            "fields": [
-                {
-                    "name": "field_a",
-                    "type": [
-                        "null",
-                        {
-                            "name": "Inner",
-                            "type": "record",
-                            "fields": [
-                                {
-                                    "name": "inner_a",
-                                    "type": "string"
-                                }
-                            ]
-                        }
-                    ],
-                    "default": null
-                },
-                {
-                    "name": "field_b",
-                    "type": [
-                        "null",
-                        "Inner"
-                    ],
-                    "default": null
-                }
-            ]
-        }"#;
-
-        #[derive(Serialize, Deserialize)]
-        struct Inner {
-            inner_a: String,
-        }
-
-        #[derive(Serialize, Deserialize)]
-        struct Message {
-            field_a: Option<Inner>,
-            field_b: Option<Inner>,
-        }
-
-        let schema = Schema::parse_str(schema_str).unwrap();
-
-        let msg = Message {
-            field_a: Some(Inner {
-                inner_a: "foo".to_string(),
-            }),
-            field_b: if set_field_b {
-                Some(Inner {
-                    inner_a: "bar".to_string(),
-                })
-            } else {
-                None
-            },
-        };
-
-        let mut ser = Serializer::default();
-        let test_value: Value = msg.serialize(&mut ser).unwrap();
-        assert!(test_value.validate(&schema), "test_value should validate");
-        assert!(
-            test_value.resolve(&schema).is_ok(),
-            "test_value should resolve"
-        );
-    }
-
-    #[test]
-    fn test_avro_3688_field_b_not_set() {
-        avro_3688_schema_resolution_panic(false);
-    }
-
-    #[test]
-    fn test_avro_3688_field_b_set() {
-        avro_3688_schema_resolution_panic(true);
-    }
-
-    #[test]
-    fn validate_record_union() {
-        // {
-        //    "type": "record",
-        //    "fields": [
-        //      {"type": "long", "name": "a"},
-        //      {"type": "string", "name": "b"},
-        //      {
-        //          "type": [ "int", "long"]
-        //          "name": "c",
-        //          "default": null
-        //      }
-        //    ]
-        // }
-        let schema = Schema::Record {
-            name: Name::new("some_record").unwrap(),
-            aliases: None,
-            doc: None,
-            fields: vec![
-                RecordField {
-                    name: "a".to_string(),
-                    doc: None,
-                    default: None,
-                    schema: Schema::Long,
-                    order: RecordFieldOrder::Ascending,
-                    position: 0,
-                    custom_attributes: Default::default(),
-                },
-                RecordField {
-                    name: "b".to_string(),
-                    doc: None,
-                    default: None,
-                    schema: Schema::String,
-                    order: RecordFieldOrder::Ascending,
-                    position: 1,
-                    custom_attributes: Default::default(),
-                },
-                RecordField {
-                    name: "c".to_string(),
-                    doc: None,
-                    default: Some(JsonValue::Null),
-                    schema: Schema::Union(
-                        UnionSchema::new(vec![Schema::Int, Schema::Long]).unwrap(),
-                    ),
-                    order: RecordFieldOrder::Ascending,
-                    position: 2,
-                    custom_attributes: Default::default(),
-                },
-            ],
-            lookup: [
-                ("a".to_string(), 0),
-                ("b".to_string(), 1),
-                ("c".to_string(), 2),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
-            attributes: Default::default(),
-        };
-
-        // assert!(Value::Map(
-        //     vec![
-        //         ("a".to_string(), Value::Long(42i64)),
-        //         ("b".to_string(), Value::String("foo".to_string())),
-        //         (
-        //             "c".to_string(),
-        //             Value::Union(2, Box::new(Value::Long(42i64)))
-        //         ),
-        //     ]
-        //     .into_iter()
-        //     .collect()
-        // )
-        // .validate(&schema));
-
-        assert!(Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("b".to_string(), Value::String("foo".to_string())),
-            (
-                "c".to_string(),
-                Value::Union(2, Box::new(Value::Long(24i64)))
-            ),
-        ])
-        .validate(&schema));
-
-        // assert!(Value::Map(
-        //     vec![
-        //         ("a".to_string(), Value::Long(42i64)),
-        //         ("b".to_string(), Value::String("foo".to_string())),
-        //         (
-        //             "c".to_string(),
-        //             Value::Union(2, Box::new(Value::Long(42i64)))
-        //         ),
-        //     ]
-        //     .into_iter()
-        //     .collect()
-        // )
-        // .validate(&schema));
-
-        // assert!(Value::Union(
-        //     1,
-        //     Box::new(Value::Record(vec![
-        //         ("a".to_string(), Value::Long(42i64)),
-        //         ("b".to_string(), Value::String("foo".to_string())),
-        //     ]))
-        // )
-
-        //      assert!(Value::Union(2, Box::new(Value::Long(42i64)),).validate(&union_schema));
+                    }
+                ]
+            }
+            "#,
+        )
+        .unwrap();
+        assert!(value.validate(&schema));
     }
 }

@@ -65,8 +65,10 @@ dependencies = [
  "pretty_assertions",
  "quad-rand",
  "rand",
+ "ref_thread_local",
  "regex",
  "serde",
+ "serde_bytes",
  "serde_json",
  "sha2",
  "snap",
@@ -860,6 +862,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fed41fc1a24994d044e6db6935e69511a1153b52c15eb42493b26fa87feba0"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.7"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
