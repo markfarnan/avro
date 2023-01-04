@@ -16,6 +16,9 @@
 // under the License.
 
 //! Logic for serde-compatible deserialization.
+
+#![allow(unused_imports)]
+
 use crate::{types::Value, Error};
 use serde::{
     de::{self, DeserializeSeed, Visitor},
